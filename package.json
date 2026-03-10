@@ -1,0 +1,32 @@
+{
+  "name": "myagent-copilot-standalone",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Standalone Copilot proxy package extracted from the MyAgent/OpenClaw integration flow",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --import tsx src/cli.ts serve",
+    "export:zip": "node export-release.mjs",
+    "serve": "node dist/cli.js serve",
+    "serve:local": "node --import tsx src/cli.ts serve --host 127.0.0.1 --port 3010",
+    "serve:public": "node --import tsx src/cli.ts serve --host 0.0.0.0 --port 3010",
+    "login": "node --import tsx src/cli.ts login",
+    "token": "node --import tsx src/cli.ts token --json",
+    "usage": "node --import tsx src/cli.ts usage --json",
+    "health": "node --import tsx src/cli.ts health"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

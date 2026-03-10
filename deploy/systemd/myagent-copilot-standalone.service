@@ -1,0 +1,16 @@
+[Unit]
+Description=MyAgent Copilot Standalone Proxy
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/myagent-copilot-standalone
+EnvironmentFile=/etc/myagent-copilot-standalone.env
+ExecStart=/usr/bin/node dist/cli.js serve --host 127.0.0.1 --port 3010
+Restart=always
+RestartSec=5
+User=myagent
+Group=myagent
+
+[Install]
+WantedBy=multi-user.target
