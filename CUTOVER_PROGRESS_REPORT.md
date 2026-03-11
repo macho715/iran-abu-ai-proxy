@@ -397,3 +397,68 @@ $secretA = "<SECRET_A>"
 ### 판정
 - `/api/ai/token`/`/api/ai/chat` 백엔드 경로와 브라우저 직접 호출은 모두 정상.
 - `fail to fetch`는 더 이상 재현되지 않았고, 원격 콘솔에서 오래된 loopback/shared 토큰이 남아있는 환경은 위 변경으로 진입 경로가 차단됨.
+
+## 13) 2026-03-11 최종 확정 — Git Push + Vercel 배포 완료
+
+### 최종 실행 요약
+- 실행 위치: `C:\Users\jichu\Downloads\iran_abu_dash-main\standalone-package`
+- 대상 브랜치: `main`
+- 원격: `origin` → `https://github.com/macho715/iran-abu-ai-proxy.git`
+
+### Git 반영
+- 확인:
+  - `git rev-parse --short HEAD` = `90f073a`
+  - `git rev-parse --short origin/main` = `90f073a`
+  - `git log --oneline origin/main..HEAD` = 없음 (커밋 선행 반영 상태)
+- 액션:
+  - `git status` 정리(미추적 디버그 스크립트 제거)
+  - `git push origin main`
+- 결과:
+  - `Everything up-to-date` (`90f073a` 기준 최종 반영 상태 유지)
+
+### Vercel 업로드(재배포)
+- 실행:
+  - `Set-Location ..\react; vercel deploy --prod -y`
+- 결과:
+  - Production URL: `https://iran-abu-dash.vercel.app`
+  - 이전 Alias도 정상 유지됨
+  - Deployment 상태: READY
+
+### 최종 Cutover 검증
+- 실행:
+  - `verify-cutover.ps1 -ProxyUrl https://iran-abu-ai-proxy.onrender.com/api/ai/chat -TokenUrl https://iran-abu-dash.vercel.app/api/ai/token -Origin https://iran-abu-dash.vercel.app -ExpectedProxyEndpoint https://iran-abu-ai-proxy.onrender.com/api/ai/chat`
+- 결과:
+  - `health` PASS (200)
+  - `preflight allowed` PASS (204)
+  - `preflight forbidden` PASS (403)
+  - `token mint endpoint` PASS (200)
+  - `minted endpoint match` PASS
+  - `chat with minted token` PASS
+  - `chat invalid token` PASS
+
+### UI 스모크(최종 재확인)
+- 실행:
+  - `node .\\.playwright\\ai-ui-smoke-temp.cjs "https://iran-abu-dash.vercel.app"`
+- 결과:
+  - Dashboard load PASS
+  - Ask AI trigger PASS (응답 200)
+  - Simulator 보조 PASS (응답 200)
+  - SourceGap 재분석 PASS (응답 200)
+
+### 실패 이력 정리(해결 상태)
+- `VERCEL_TOKEN` 유효성 오류 (`<...>`, `<실제_...>`, 길이 부족 문자열)
+  - 해결: 실제 값으로 치환 후 실행, 필요 시 `vercel whoami` fallback 사용
+- `proxy/local loopback` 폴백으로 인한 `fail to fetch`
+  - 해결: 프론트 endpoint 오염 가드 적용 + 배포 정합성 확보
+- `ENOENT: /etc/secrets/cache` 502
+  - 해결: 캐시 경로 안전화 패치 + Render 재배포 후 PASS로 전환 확인
+
+### 최종 판정
+- 운영 cutover: PASS
+- 백엔드 게이트/토큰/챗 경로: PASS
+- 프런트 AI 호출 경로 정합성: PASS
+- 실사용 재검증: PASS
+
+```text
+최종 상태: Git push 완료, Vercel production redeploy 완료, Ask AI/Simulator/SourceGapPanel 모두 실사용 응답 확인 완료.
+```
