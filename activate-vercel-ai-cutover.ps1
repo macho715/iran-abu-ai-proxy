@@ -131,9 +131,15 @@ Add-VercelEnv -Name "AI_PROXY_ACTIVE_SIGNING_SECRET" -Value $SecretA -Environmen
 Add-VercelEnv -Name "AI_PROXY_TOKEN_ISSUER" -Value $Issuer -Environment "production"
 Add-VercelEnv -Name "AI_PROXY_TOKEN_AUDIENCE" -Value $Audience -Environment "production"
 Add-VercelEnv -Name "AI_PROXY_TOKEN_TTL_SECONDS" -Value "$AiProxyTtlSeconds" -Environment "production"
+# VITE_AI_ENDPOINT: build-time env var consumed by the React client (aiConfig.js).
+# Without this, getAiEndpoint() falls back to http://127.0.0.1:3010 which isLoopbackEndpoint()
+# treats as "local" mode, bypassing the JWT token flow and causing "Failed to fetch" in prod.
+Add-VercelEnv -Name "VITE_AI_ENDPOINT" -Value $ProxyEndpoint -Environment "production"
 
 Write-Host "==> 2) Set preview AI disabled"
 Add-VercelEnv -Name "AI_PROXY_ENABLED" -Value "0" -Environment "preview"
+# VITE_AI_ENDPOINT is intentionally not set for preview: AI is disabled there,
+# so falling back to localhost default (which fails gracefully) is acceptable.
 
 Write-Host "==> 3) Production redeploy"
 vercel deploy --prod -y -t $tokenValue

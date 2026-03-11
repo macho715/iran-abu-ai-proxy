@@ -2,6 +2,33 @@
 
 ---
 
+## [2026-03-11] "Failed to fetch" 원인 확정 및 activate-vercel-ai-cutover.ps1 수정
+
+### 원인
+브라우저에서 실제 채팅 호출 URL = `http://127.0.0.1:3010/api/ai/chat` (기본 폴백)
+- `VITE_AI_ENDPOINT`가 Vercel 빌드에 미설정 → `getAiEndpoint()` 기본값 `localhost:3010` 반환
+- `isLoopbackEndpoint()=true` → JWT 토큰 플로우 완전 우회, chat 요청이 localhost로 직행
+- 로컬 서버 없음 → `Failed to fetch`
+
+`activate-vercel-ai-cutover.ps1`이 `AI_PROXY_ENDPOINT`(서버사이드)는 설정했으나
+`VITE_AI_ENDPOINT`(클라이언트 빌드타임)는 누락되어 있었음.
+
+### 수정 내용
+`activate-vercel-ai-cutover.ps1`: production 환경에 `VITE_AI_ENDPOINT=$ProxyEndpoint` 추가
+
+### 즉시 조치 (라이브 배포 반영)
+```powershell
+.\standalone-package\activate-vercel-ai-cutover.ps1 -PromptForMissing -RunSmoke
+```
+프롬프트 입력:
+1. `VERCEL_TOKEN` (Vercel → Settings → Tokens)
+2. `AI_PROXY_ACTIVE_SIGNING_SECRET` (Render `MYAGENT_PROXY_TOKEN_SIGNING_SECRETS`와 동일값)
+
+또는 Vercel 대시보드 수동:
+- `VITE_AI_ENDPOINT` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` → Redeploy
+
+---
+
 ## [2026-03-11] 최종 상태: 백엔드 PASS, UI 스모크 테스트 버그 수정 완료
 
 ### verify-cutover.ps1 전 항목 PASS (chat 200 확인)
