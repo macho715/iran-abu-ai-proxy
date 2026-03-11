@@ -73,8 +73,15 @@ export function deriveCopilotApiBaseUrlFromToken(token: string): string {
 }
 
 export function clearCachedRuntimeToken(env: NodeJS.ProcessEnv = process.env): void {
-  const cachePath = resolveTokenCachePath(env);
-  saveJsonFile(cachePath, {});
+  const cachePaths = resolveTokenCachePaths(env);
+  for (const cachePath of cachePaths) {
+    try {
+      saveJsonFile(cachePath, {});
+      break;
+    } catch {
+      // Ignore cache clear failures in environments with read-only auth home.
+    }
+  }
 }
 
 export async function resolveCopilotRuntimeToken(params: {
