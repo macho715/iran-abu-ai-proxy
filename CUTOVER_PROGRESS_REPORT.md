@@ -372,3 +372,28 @@ $secretA = "<SECRET_A>"
   - Simulator AI 보조 재분석 1회 성공 렌더
   - SourceGapPanel 재분석 1회 성공 렌더
 - UI 스모크 통과 후 동일 결과를 문서 최상단에 날짜/성공코드/응답 코드로 기록.
+
+## 12) 2026-03-11(추가) — 프론트 오염 방지 하드닝 후 재검증
+
+### 적용 변경
+- `react/src/lib/aiConfig.js`
+  - `getAiEndpoint()`가 비로컬/운영에서는 `__JPT71_AI_ENDPOINT__`, `__URGENTDASH_AI_ENDPOINT__`, `aiEndpoint` 쿼리값이 loopback일 경우 즉시 무시.
+  - `VITE_AI_ENDPOINT`가 loopback일 때도 비로컬 환경에서는 기본 폴백으로 전환.
+  - `getAiProxyToken()`에서 비로컬 환경에서 non-JWT 공유 토큰(예: 구형 문자열)을 무시(공유 토큰 오염 의심 시 JWT만 사용).
+  - `isLikelyJwtToken` 보조 함수 추가.
+- `standalone-package/probe-dashboard-runtime.mjs`
+  - Playwright `page.evaluate` 인자 전달 방식을 객체형 인자로 통일(`(endpoint, token)` → `({endpoint, token})`)하여 기존 `Too many arguments` 오류 제거.
+- `react/src/lib/aiConfig.test.js`
+  - loopback 오염 및 비로컬 token 무시 로직에 대한 회귀 테스트 추가.
+
+### 검증
+- `pnpm test -- src/lib/aiConfig.test.js src/lib/aiChat.test.js` → PASS 2 files / 16 tests
+- `node standalone-package/probe-dashboard-runtime.mjs https://iran-abu-dash.vercel.app https://iran-abu-ai-proxy.onrender.com/api/ai/chat`
+  - `token endpoint: https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (200)
+  - `POST /api/ai/chat` with same endpoint → status 200, `pong — how can I help?`
+- `.\standalone-package\verify-cutover.ps1 -ProxyUrl ... -TokenUrl ... -Origin ...` (all params to onrender + production dashboard)
+  - health/preflight/token/chat 항목 전부 PASS
+
+### 판정
+- `/api/ai/token`/`/api/ai/chat` 백엔드 경로와 브라우저 직접 호출은 모두 정상.
+- `fail to fetch`는 더 이상 재현되지 않았고, 원격 콘솔에서 오래된 loopback/shared 토큰이 남아있는 환경은 위 변경으로 진입 경로가 차단됨.
