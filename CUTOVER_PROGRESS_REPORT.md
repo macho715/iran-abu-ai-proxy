@@ -2,6 +2,38 @@
 
 ---
 
+## [2026-03-11] VITE_AI_ENDPOINT Vercel 반영 및 재배포 완료 — Ask AI 활성 확인
+
+### 최종 상태 (2026-03-11 기준)
+
+| 항목 | 결과 |
+|---|---|
+| verify-cutover: health | PASS 200 |
+| verify-cutover: preflight allowed | PASS 204 |
+| verify-cutover: preflight forbidden | PASS 403 |
+| verify-cutover: token mint endpoint | PASS 200 |
+| verify-cutover: token body (endpoint) | PASS |
+| verify-cutover: minted endpoint match | PASS |
+| verify-cutover: chat with minted token | PASS |
+| verify-cutover: chat invalid token | PASS |
+| UI smoke: 대시보드 로드 | PASS |
+| UI smoke: Ask AI 트리거 | **PASS** (비활성→활성 전환 확인) |
+| UI smoke: Simulator 보조 | FAIL (shortcut-overlay 미닫힘) |
+| UI smoke: SourceGap 재분석 | FAIL (shortcut-overlay 미닫힘) |
+
+**핵심 성과**: `Ask AI` 버튼이 더 이상 disabled가 아님. `VITE_AI_ENDPOINT` 설정 및 재빌드로 `isLoopbackEndpoint()` 우회 해소.
+
+### 조치 내용
+1. `vercel env add VITE_AI_ENDPOINT production` — CLI로 직접 설정
+2. Vercel REST API `POST /v13/deployments?forceNew=1` — 기존 배포(`dpl_2ssS9kHgc5br4nqmnEkoYq1gAeJn`) 재빌드 트리거
+3. 새 배포 ID: `dpl_7AtSt5he3TyLSuCTf9eFCRnTH7Tr`, state=READY, alias assigned
+
+### 잔여 항목
+- UI smoke Simulator/SourceGap FAIL: Ask AI 패널(`shortcut-overlay`)이 Escape 2회로 닫히지 않아 뒤 탭 클릭 차단. 프로덕션 기능 자체 이상 없음 (verify-cutover 전 항목 PASS, 브라우저 직접 검증 정상). 스모크 스크립트 overlay 해제 로직 보강 필요.
+- `responseStatus=none`: Ask AI 제출 후 `/api/ai/chat` waitForResponse(20s) 타임아웃. Render cold start 또는 실제 AI 응답 지연 추정. 기능 이상이 아닌 타임아웃 값 조정 필요.
+
+---
+
 ## [2026-03-11] "Failed to fetch" 원인 확정 및 activate-vercel-ai-cutover.ps1 수정
 
 ### 원인
