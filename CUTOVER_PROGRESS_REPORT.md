@@ -172,6 +172,24 @@ Start-Sleep -Seconds 60
   - `{"requestId":"437b85af-89b0-4088-9694-657025b8a87b","error":"COPILOT_PROXY_FAILED","detail":"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'","code":"unknown"}`
 - 판정: 코드는 `ENOENT`를 직접 유발하지 않아야 하지만, Render 운용 코드가 아직 이전 상태이므로 재배포 완료 후 상태가 바뀔 것으로 판단합니다.
 
+### 11) `2026-03-11 11:21:00+04:00` 재배포 후 통과
+- `Render` 수동 재배포 완료: `dep-d6ohe6bh46gs73akug30`
+- `verify-cutover.ps1` 실행 결과
+  - `GET /api/ai/health` = 200 (PASS)
+  - `OPTIONS` 허용 origin = 204 (PASS)
+  - `OPTIONS` 금지 origin = 403 (PASS)
+  - `GET /api/ai/token` = 200 (PASS)
+  - `minted endpoint` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (PASS)
+  - `POST /api/ai/chat`(minted token) = PASS
+  - `POST /api/ai/chat`(invalid token) = PASS
+- `cutover` 전체 PASS
+- UI 스모크(`.playwright/ai-ui-smoke-temp.cjs`) 결과
+  - 대시보드 로드: PASS
+  - Ask AI 트리거: PASS
+  - Simulator 보조: PASS (`responseStatus=none`)
+  - SourceGap 재분석: PASS (`responseStatus=none`)
+- 판정: cutover 백엔드 경로는 통과. 실제 AI 응답 노출은 해당 환경별 기능 상태/입력 조건에 따라 재확인 필요.
+
 ## 5) 단계별 대응(계획 고정)
 
 ### `2026-03-11 11:02:00+04:00` 로컬 패치 반영 직후 검증 상태
