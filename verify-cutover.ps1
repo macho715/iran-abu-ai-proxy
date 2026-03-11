@@ -224,12 +224,17 @@ if ($token) {
   } -Body $chatPayload
   if (-not (Assert-Status "chat with minted token" $chat.StatusCode @(200, 409, 422))) {
     $failures++
-    if ($chat.Content) { Write-Host "[INFO] chat error body: $($chat.Content)" }
-    elseif ($chat.ErrorMessage) { Write-Host "[INFO] chat error detail: $($chat.ErrorMessage)" }
-    else {
+    if ($chat.Content -and ($chat.Content -is [string]) -and ($chat.Content -notmatch "^\s*Headers\r?\n-------")) {
+      Write-Host "[INFO] chat error body: $($chat.Content)"
+    } elseif ($chat.ErrorMessage) {
+      Write-Host "[INFO] chat error detail: $($chat.ErrorMessage)"
+    }
+
+    if (-not $chat.Content -or -not ($chat.Content -is [string]) -or ($chat.Content -match "^\s*Headers\r?\n-------")) {
       $fallbackBody = Invoke-CurlBodyFallback -Method "POST" -Url "$ProxyBase/api/ai/chat" -Headers @{
         Origin = $Origin
         "x-ai-proxy-token" = $token
+        "Content-Type" = "application/json"
       } -Body $chatPayload
       if ($fallbackBody) { Write-Host "[INFO] chat curl fallback body: $fallbackBody" }
     }

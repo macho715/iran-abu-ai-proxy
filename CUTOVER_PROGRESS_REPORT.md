@@ -114,6 +114,18 @@ Set-Location "C:\Users\jichu\Downloads\iran_abu_dash-main"
   - `{"requestId":"2b54eea3-b29f-455c-bfed-f335009a6ddd","error":"COPILOT_PROXY_FAILED","detail":"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'","code":"unknown"}`
 - 판정: 동일 증상 재현. 여전히 `/etc/secrets/cache` 경로 기반 런타임 캐시 처리 실패가 차단 요인.
 
+### 9) `2026-03-11 11:20:00+04:00` 패치 반영 후 재검증
+- `verify-cutover.ps1` 실행 결과
+  - `GET /api/ai/health` = 200 (PASS)
+  - `OPTIONS` 허용 origin = 204 (PASS)
+  - `OPTIONS` 금지 origin = 403 (PASS)
+  - `GET /api/ai/token` = 200 (PASS)
+  - `minted endpoint` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (PASS)
+  - `POST /api/ai/chat`(minted token) = **502** (FAIL)
+- `verify-cutover` 오류 바디 캡처 결과:
+  - `{"requestId":"72dc10dd-87ba-4720-a47f-53ed33fe7faf","error":"COPILOT_PROXY_FAILED","detail":"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'","code":"unknown"}`
+- 현재 판단: 코드 패치 자체는 원격 반영이 전제되어야 확인 가능하므로, Render 재배포 후 재실행해야 함.
+
 ## 5) 단계별 대응(계획 고정)
 
 ### `2026-03-11 11:02:00+04:00` 로컬 패치 반영 직후 검증 상태
