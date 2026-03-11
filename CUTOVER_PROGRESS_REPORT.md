@@ -2,6 +2,38 @@
 
 ---
 
+## [2026-03-11] 최종 상태: 백엔드 PASS, UI 스모크 테스트 버그 수정 완료
+
+### verify-cutover.ps1 전 항목 PASS (chat 200 확인)
+| 항목 | 결과 |
+|---|---|
+| health | PASS 200 |
+| preflight allowed | PASS 204 |
+| preflight forbidden | PASS 403 |
+| token mint endpoint | PASS 200 |
+| minted endpoint match | PASS |
+| chat with minted token | **PASS 200** |
+| chat invalid token | PASS 401 |
+
+브라우저 직접 검증: `POST /api/ai/chat → 200, "pong — how can I help?"`
+
+### UI 스모크 "Ask AI 비활성 상태" 원인 및 수정
+
+**원인**: `ai-ui-smoke-temp.cjs`의 Ask AI 체크 로직이 textarea에 텍스트를 입력하기 **전에**
+`submit.isDisabled()` 를 호출함. 제출 버튼은 textarea가 비어 있을 때 정상적으로 disabled이므로
+AI 비활성이 아님에도 "비활성 상태"로 오판.
+
+**확인 방법**: 브라우저 콘솔에서 `fetch('/api/ai/token')` 결과 정상,
+textarea에 텍스트 입력 시 버튼 활성화 확인.
+
+**수정 내용**:
+- `.playwright/ai-ui-smoke-temp.cjs`: `questionInput.fill()` 호출을 `isDisabled()` **앞**으로 이동
+- `verify-cutover.ps1`: token body 검증 추가 — HTTP 200이어도 `AI_PROXY_DISABLED` 코드 감지 시 FAIL 처리
+
+**커밋**: 다음 커밋에 포함 예정
+
+---
+
 ## [2026-03-11] 502 COPILOT_PROXY_FAILED 근본 원인 분석 및 조치
 
 ### 원인

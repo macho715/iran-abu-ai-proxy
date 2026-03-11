@@ -206,6 +206,17 @@ if ($tokenResp.Content) {
   }
 }
 
+# Validate token body: HTTP 200 alone does not mean a token was minted.
+# /api/ai/token returns 200 + { error: "AI_PROXY_DISABLED" } when AI_PROXY_ENABLED != "1".
+if ($tokenPayload -and $tokenPayload.PSObject.Properties['error'] -and $tokenPayload.error -eq "AI_PROXY_DISABLED") {
+  Write-Host "[FAIL] token body: AI_PROXY_DISABLED — set AI_PROXY_ENABLED=1 in Vercel env vars and redeploy"
+  $failures++
+} elseif ($tokenPayload -and $tokenPayload.token) {
+  Write-Host "[PASS] token body (endpoint=$($tokenPayload.endpoint))"
+} elseif ($tokenResp.StatusCode -eq 200) {
+  Write-Host "[WARN] token endpoint returned 200 but body contains no token field"
+}
+
 $token = if ($tokenPayload -and $tokenPayload.token) { $tokenPayload.token } else { "" }
 $mintedEndpoint = if ($tokenPayload -and $tokenPayload.endpoint) { $tokenPayload.endpoint } else { "" }
 
