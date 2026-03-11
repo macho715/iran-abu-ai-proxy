@@ -26,6 +26,40 @@ Set-Location "C:\Users\jichu\Downloads\iran_abu_dash-main"
 1. Render API 키 (`dashboard.render.com → Account Settings → API Keys`)
 2. GitHub PAT (`Copilot 접근 권한 있는 ghp_... 또는 ghu_...`)
 
+### 지금 확정된 고정 원인 및 다음 즉시 조치
+- `MYAGENT_HOME=/etc/secrets` 상태에서 이전 런타임이 `/etc/secrets/cache` 생성 시도 시 ENOENT가 재현되어 `chat`만 실패했습니다.
+- 패치는 적용되어 있으며, Render가 최신 커밋으로 재배포되면 더 이상 `/etc/secrets/cache`를 쓰지 않고 `/tmp` fallback을 사용해야 합니다.
+- 즉시 재배포 + 즉시 검증을 수행하십시오.
+
+```powershell
+# 1) Render API 키 세팅
+$env:RENDER_API_KEY = "<실제 Render API 키>"
+$svc = Invoke-RestMethod `
+  -Uri "https://api.render.com/v1/services?name=iran-abu-ai-proxy&limit=5" `
+  -Headers @{ Authorization = "Bearer $env:RENDER_API_KEY"; Accept = "application/json" }
+$serviceId = ($svc | Where-Object { $_.service.name -eq "iran-abu-ai-proxy" }).service.id
+
+# 2) 재배포 트리거 (clear cache 없이 재시작)
+Invoke-RestMethod `
+  -Uri "https://api.render.com/v1/services/$serviceId/deploys" `
+  -Headers @{ Authorization = "Bearer $env:RENDER_API_KEY"; "Content-Type" = "application/json"; Accept = "application/json" } `
+  -Method POST `
+  -Body '{"clearCache":"do_not_clear"}'
+
+Start-Sleep -Seconds 60
+
+# 3) 배포 반영 즉시 검증
+.\standalone-package\verify-cutover.ps1 `
+  -ProxyUrl "https://iran-abu-ai-proxy.onrender.com/api/ai/chat" `
+  -TokenUrl "https://iran-abu-dash.vercel.app/api/ai/token" `
+  -Origin "https://iran-abu-dash.vercel.app" `
+  -ExpectedProxyEndpoint "https://iran-abu-ai-proxy.onrender.com/api/ai/chat"
+```
+
+재배포 후 `chat with minted token`의 오류 본문이
+`ENOENT: no such file or directory, mkdir '/etc/secrets/cache'`
+가 사라지면 다음 단계(Ask AI / Simulator / SourceGapPanel 재트리거)로 진행합니다.
+
 ---
 
 ## 1) 운영 목표 (요청 반영)
@@ -81,10 +115,10 @@ Set-Location "C:\Users\jichu\Downloads\iran_abu_dash-main"
 4. `activate-vercel-ai-cutover.ps1` 실행 경로에서 `--token` 전달 값 유효성 선검증 추가로 `wlrwjqgkfk` 같은 짧은 문자열은 즉시 중단되도록 정규화.
 5. `Add-VercelEnv` 함수에서 Vercel CLI 버전별 동작 차이를 보완(현재 스크립트는 `--value` 실패 시 stdin 재시도).
 6. `src/runtime-token.ts` 패치 후 커밋/푸시 완료.
-   - 커밋: `4d6ce90`
-   - 메시지: `fix: avoid write cache when myagent home path is read-only`
-   - 브랜치: `chore/harden-cutover-script`
-   - 푸시: `origin/chore/harden-cutover-script`
+   - 커밋: `2975412`, `17db9ed`, `583c298` (실패 원인 확인까지 반영)
+   - 메시지: `fix: avoid write cache when myagent home path is read-only`, `chore: harden runtime cache path and finalize cutover runbook`, `chore: improve cutover diagnostics and record latest 502 status`
+   - 브랜치: `main`
+   - 푸시: `origin/main`
 7. `2026-03-11 10:41:27+04:00` 기준 재검증
    - `verify-cutover.ps1` 실행
      - `GET /api/ai/health` = 200 (PASS)
@@ -125,6 +159,18 @@ Set-Location "C:\Users\jichu\Downloads\iran_abu_dash-main"
 - `verify-cutover` 오류 바디 캡처 결과:
   - `{"requestId":"72dc10dd-87ba-4720-a47f-53ed33fe7faf","error":"COPILOT_PROXY_FAILED","detail":"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'","code":"unknown"}`
 - 현재 판단: 코드 패치 자체는 원격 반영이 전제되어야 확인 가능하므로, Render 재배포 후 재실행해야 함.
+
+### 10) `2026-03-11 11:??:??+04:00` 재실행 (현재)
+- `verify-cutover.ps1` 실행 결과 (최신)
+  - `GET /api/ai/health` = 200 (PASS)
+  - `OPTIONS` 허용 origin = 204 (PASS)
+  - `OPTIONS` 금지 origin = 403 (PASS)
+  - `GET /api/ai/token` = 200 (PASS)
+  - `minted endpoint` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (PASS)
+  - `POST /api/ai/chat`(minted token) = **502** (FAIL)
+- 응답 본문:
+  - `{"requestId":"437b85af-89b0-4088-9694-657025b8a87b","error":"COPILOT_PROXY_FAILED","detail":"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'","code":"unknown"}`
+- 판정: 코드는 `ENOENT`를 직접 유발하지 않아야 하지만, Render 운용 코드가 아직 이전 상태이므로 재배포 완료 후 상태가 바뀔 것으로 판단합니다.
 
 ## 5) 단계별 대응(계획 고정)
 
