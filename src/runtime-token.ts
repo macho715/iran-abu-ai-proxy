@@ -1,4 +1,5 @@
 import path from "node:path";
+import os from "node:os";
 import { loadJsonFile, resolveMyAgentHome, saveJsonFile } from "./state.js";
 
 const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
@@ -20,6 +21,14 @@ export type RuntimeTokenExchange = {
 
 function resolveTokenCachePath(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(resolveMyAgentHome(env), "cache", "github-copilot.token.json");
+}
+
+function resolveFallbackCachePath(): string {
+  return path.join(os.tmpdir(), "myagent-copilot", "cache", "github-copilot.token.json");
+}
+
+function resolveTokenCachePaths(env: NodeJS.ProcessEnv = process.env): string[] {
+  return [resolveTokenCachePath(env), resolveFallbackCachePath()];
 }
 
 function parseCopilotTokenResponse(value: unknown): { token: string; expiresAt: number } {
@@ -75,18 +84,20 @@ export async function resolveCopilotRuntimeToken(params: {
   forceRefresh?: boolean;
 }): Promise<RuntimeTokenExchange> {
   const env = params.env ?? process.env;
-  const cachePath = resolveTokenCachePath(env);
+  const cachePaths = resolveTokenCachePaths(env);
 
   if (!params.forceRefresh) {
-    const cached = loadJsonFile<CachedCopilotToken>(cachePath);
-    if (cached && typeof cached.token === "string" && typeof cached.expiresAt === "number") {
-      if (isTokenUsable(cached)) {
-        return {
-          token: cached.token,
-          expiresAt: cached.expiresAt,
-          source: `cache:${cachePath}`,
-          baseUrl: deriveCopilotApiBaseUrlFromToken(cached.token),
-        };
+    for (const cachePath of cachePaths) {
+      const cached = loadJsonFile<CachedCopilotToken>(cachePath);
+      if (cached && typeof cached.token === "string" && typeof cached.expiresAt === "number") {
+        if (isTokenUsable(cached)) {
+          return {
+            token: cached.token,
+            expiresAt: cached.expiresAt,
+            source: `cache:${cachePath}`,
+            baseUrl: deriveCopilotApiBaseUrlFromToken(cached.token),
+          };
+        }
       }
     }
   }
@@ -110,7 +121,14 @@ export async function resolveCopilotRuntimeToken(params: {
     expiresAt: parsed.expiresAt,
     updatedAt: Date.now(),
   };
-  saveJsonFile(cachePath, payload);
+  for (const cachePath of cachePaths) {
+    try {
+      saveJsonFile(cachePath, payload);
+      break;
+    } catch {
+      // Ignore cache write failures in restrictive runtimes (e.g., /etc/secrets read-only).
+    }
+  }
 
   return {
     token: payload.token,
