@@ -1,5 +1,6 @@
 import path from "node:path";
 import os from "node:os";
+import fs from "node:fs";
 import { loadJsonFile, resolveMyAgentHome, saveJsonFile } from "./state.js";
 
 const COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token";
@@ -27,8 +28,25 @@ function resolveFallbackCachePath(): string {
   return path.join(os.tmpdir(), "myagent-copilot", "cache", "github-copilot.token.json");
 }
 
+function canWriteDirectory(pathname: string): boolean {
+  const parentDir = path.dirname(pathname);
+  try {
+    fs.mkdirSync(parentDir, { recursive: true });
+
+    const probePath = path.join(parentDir, `.myagent-write-probe-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(probePath, "probe");
+    fs.unlinkSync(probePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveTokenCachePaths(env: NodeJS.ProcessEnv = process.env): string[] {
-  return [resolveTokenCachePath(env), resolveFallbackCachePath()];
+  const homeCache = resolveTokenCachePath(env);
+  const fallbackCache = resolveFallbackCachePath();
+  const paths = [homeCache, fallbackCache];
+  return paths.filter((cachePath) => canWriteDirectory(cachePath));
 }
 
 function parseCopilotTokenResponse(value: unknown): { token: string; expiresAt: number } {

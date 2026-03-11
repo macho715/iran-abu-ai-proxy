@@ -4,9 +4,30 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$TokenUrl,
   [string]$Origin = "https://iran-abu-dash.vercel.app",
-[string]$ExpectedProxyEndpoint = "",
-[string]$ForbiddenOrigin = "https://forbidden.invalid"
+  [string]$ExpectedProxyEndpoint = "",
+  [string]$ForbiddenOrigin = "https://forbidden.invalid"
 )
+
+function Get-ErrorBodyFromWebException {
+  param(
+    [Parameter(Mandatory=$true)]$Exception
+  )
+
+  try {
+    if ($Exception.ErrorDetails -and $Exception.ErrorDetails.Message) {
+      return $Exception.ErrorDetails.Message
+    }
+  } catch {}
+
+  try {
+    $resp = $Exception.Response
+    if ($resp -and $resp.Content -is [byte[]]) {
+      return [Text.Encoding]::UTF8.GetString($resp.Content)
+    }
+  } catch {}
+
+  return ""
+}
 
 function Invoke-WebRequestStatus {
   param(
@@ -16,6 +37,31 @@ function Invoke-WebRequestStatus {
     [string]$Body = "",
     [bool]$ReturnContent = $true
   )
+
+  function Get-ErrorBody {
+    param([object]$Response)
+    try {
+      if ($Response.Content -is [string]) { return $Response.Content }
+      if ($Response.Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($Response.Content) }
+      if ($Response.Content -is [System.Net.Http.HttpContent]) {
+        return $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+      }
+    } catch {}
+
+    try {
+      $stream = $Response.GetResponseStream()
+      $reader = New-Object System.IO.StreamReader($stream)
+      $text = $reader.ReadToEnd()
+      $reader.Close()
+      return $text
+    } catch {}
+
+    try {
+      return $Response.Content | Out-String
+    } catch {}
+
+    return ""
+  }
 
   $params = @{
     Uri = $Url
@@ -32,14 +78,25 @@ function Invoke-WebRequestStatus {
   try {
     $response = Invoke-WebRequest @params -ErrorAction Stop
   } catch {
-    $response = $_.Exception.Response
-    $detail = $_.Exception.Message
+    $ex = $_.Exception
+    $response = $ex.Response
+    $detail = Get-ErrorBodyFromWebException -Exception $ex
+
     if (-not $response) {
       return [PSCustomObject]@{
         StatusCode = 0
-        Content = $null
+        Content = ""
         ErrorMessage = $detail
       }
+    }
+
+    $body = Get-ErrorBody -Response $response
+    if (-not $body) { $body = $detail }
+
+    return [PSCustomObject]@{
+      StatusCode   = [int]$response.StatusCode
+      Content      = $body
+      ErrorMessage = $detail
     }
   }
 
@@ -55,6 +112,46 @@ function Invoke-WebRequestStatus {
     Content = ""
     ErrorMessage = ""
   }
+}
+
+function Invoke-CurlBodyFallback {
+  param(
+    [string]$Method,
+    [string]$Url,
+    [hashtable]$Headers = @{},
+    [string]$Body = ""
+  )
+
+  $headerArgs = @()
+  foreach ($entry in $Headers.GetEnumerator()) {
+    $headerArgs += "-H"
+    $headerArgs += "$($entry.Key): $($entry.Value)"
+  }
+
+  $bodyArgs = @()
+  if ($Body) {
+    $bodyArgs = @("--data", $Body)
+  }
+
+  $temp = & curl.exe -sS -i -X $Method $headerArgs $bodyArgs --max-time 30 $Url
+  if ($LASTEXITCODE -ne 0 -or -not $temp) {
+    return ""
+  }
+
+  $lines = $temp -split "`r?`n"
+  $bodyStart = 0
+  for ($i = 0; $i -lt $lines.Length - 1; $i++) {
+    if ([string]::IsNullOrWhiteSpace($lines[$i])) {
+      $bodyStart = $i + 1
+      break
+    }
+  }
+
+  if ($bodyStart -ge $lines.Length) {
+    return ""
+  }
+
+  return ($lines[$bodyStart..($lines.Length - 1)] -join "`n").Trim()
 }
 
 function Assert-Status {
@@ -125,17 +222,28 @@ if ($token) {
     Origin = $Origin
     "x-ai-proxy-token" = $token
   } -Body $chatPayload
-  if (-not (Assert-Status "chat with minted token" $chat.StatusCode @(200, 409, 422))) { $failures++ }
+  if (-not (Assert-Status "chat with minted token" $chat.StatusCode @(200, 409, 422))) {
+    $failures++
+    if ($chat.Content) { Write-Host "[INFO] chat error body: $($chat.Content)" }
+    elseif ($chat.ErrorMessage) { Write-Host "[INFO] chat error detail: $($chat.ErrorMessage)" }
+    else {
+      $fallbackBody = Invoke-CurlBodyFallback -Method "POST" -Url "$ProxyBase/api/ai/chat" -Headers @{
+        Origin = $Origin
+        "x-ai-proxy-token" = $token
+      } -Body $chatPayload
+      if ($fallbackBody) { Write-Host "[INFO] chat curl fallback body: $fallbackBody" }
+    }
+  }
 } else {
   Write-Host "[FAIL] token parsing failed"
   $failures++
 }
 
 Write-Host "==> POST /api/ai/chat with invalid token"
-$invalid = Invoke-WebRequestStatus -Method POST -Url "$ProxyBase/api/ai/chat" -Headers @{
-  Origin = $Origin
-  "x-ai-proxy-token" = "invalid.$([guid]::NewGuid().ToString()).token"
-} -Body $chatPayload
+  $invalid = Invoke-WebRequestStatus -Method POST -Url "$ProxyBase/api/ai/chat" -Headers @{
+    Origin = $Origin
+    "x-ai-proxy-token" = "invalid.$([guid]::NewGuid().ToString()).token"
+  } -Body $chatPayload
 if (-not (Assert-Status "chat invalid token" $invalid.StatusCode @(401, 403))) { $failures++ }
 
 if ($failures -gt 0) {

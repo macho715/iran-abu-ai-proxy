@@ -1,5 +1,33 @@
 # AI Cutover 운영 진행 보고서 (2026-03-11)
 
+---
+
+## [2026-03-11] 502 COPILOT_PROXY_FAILED 근본 원인 분석 및 조치
+
+### 원인
+`GET /api/ai/health`, preflight, `GET /api/ai/token`은 모두 PASS인데,  
+`POST /api/ai/chat`(minted token)에서만 `COPILOT_PROXY_FAILED`와 함께  
+`ENOENT: no such file or directory, mkdir '/etc/secrets/cache'`가 반복됩니다.
+
+현재 증거로는 `MYAGENT_HOME=/etc/secrets`일 때 런타임 캐시 경로 생성 실패가 핵심 원인으로 보입니다.  
+(`MYAGENT_GITHUB_TOKEN` 미설정 가설은 현재 로그와 정합되지 않음)
+
+### 조치 내용
+1. `verify-cutover.ps1` 패치: 에러 응답 본문 추출 우선순위 강화(`ErrorDetails` + stream + curl fallback)
+2. `src/runtime-token.ts` 패치: 쓰기 가능한 캐시 경로만 사용하도록 변경(권장 fallback 캐시 경로 우선)
+3. `setup-render-github-token.ps1` 신규 작성: Render API로 `MYAGENT_GITHUB_TOKEN` 설정 + 재배포 + verify 자동화
+
+### 다음 실행 순서
+```powershell
+Set-Location "C:\Users\jichu\Downloads\iran_abu_dash-main"
+.\standalone-package\setup-render-github-token.ps1 -PromptForMissing -RunVerify
+```
+프롬프트에서 순서대로 입력:
+1. Render API 키 (`dashboard.render.com → Account Settings → API Keys`)
+2. GitHub PAT (`Copilot 접근 권한 있는 ghp_... 또는 ghu_...`)
+
+---
+
 ## 1) 운영 목표 (요청 반영)
 
 - `AI_PROXY_DISABLED` / `AI_PROXY_ENABLED=0` 상태를 해소하고 운영 기준으로 AI 게이트를 고정한다.
@@ -57,13 +85,51 @@
    - 메시지: `fix: avoid write cache when myagent home path is read-only`
    - 브랜치: `chore/harden-cutover-script`
    - 푸시: `origin/chore/harden-cutover-script`
+7. `2026-03-11 10:41:27+04:00` 기준 재검증
+   - `verify-cutover.ps1` 실행
+     - `GET /api/ai/health` = 200 (PASS)
+     - `OPTIONS` 허용 origin = 204 (PASS)
+     - `OPTIONS` 금지 origin = 403 (PASS)
+     - `GET /api/ai/token` = 200 (PASS)
+     - `minted endpoint` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (PASS)
+     - `POST /api/ai/chat`(minted token) = **502** (FAIL)
+   - 응답 본문:
+     - `{\"error\":\"COPILOT_PROXY_FAILED\",\"detail\":\"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'\",\"code\":\"unknown\"}`
+   - 판정: 여전히 `/etc/secrets/cache` 쓰기 실패 경로 오류가 남아 백엔드 chat 경로 미복구.
 
 ### 판정
-- 현재 상태는 **백엔드 chat 502** 단일 실패로 수렴했으며, 현재 시점에서는 Render 서비스에 패치 반영 전 추정.
-  - 최근 `verify-cutover` 결과: `health`, `preflight`, `token mint`는 모두 PASS, `chat with minted token`만 `502 COPILOT_PROXY_FAILED` (직전과 동일).
-- `src/runtime-token.ts` 패치의 목적은 `/etc/secrets` 쓰기 실패로 인한 502를 제거하는 데 있음. Render 재배포 후 재검증이 필요.
+- 현재 상태는 **백엔드 chat 502 단일 실패**로 수렴했으며, 원인 후보는 캐시 경로 생성 실패(`/etc/secrets/cache`)로 좁혀짐.
+- 최근 `verify-cutover` 결과: `health`, `preflight`, `token mint`는 모두 PASS, `chat with minted token`만 `502 COPILOT_PROXY_FAILED`.
+- `src/runtime-token.ts` 패치는 반영되었으나 Render 운영 반영이 아직 필요함. 반영 후 재배포/재검증으로 통과 여부를 판정.
+
+### 8) `2026-03-11 10:44:10+04:00` 추가 재검증
+- `verify-cutover.ps1` 실행
+  - `GET /api/ai/health` = 200 (PASS)
+  - `OPTIONS` 허용 origin = 204 (PASS)
+  - `OPTIONS` 금지 origin = 403 (PASS)
+  - `GET /api/ai/token` = 200 (PASS)
+  - `minted endpoint` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (PASS)
+  - `POST /api/ai/chat`(minted token) = **502** (FAIL)
+- 응답 본문:
+  - `{"requestId":"2b54eea3-b29f-455c-bfed-f335009a6ddd","error":"COPILOT_PROXY_FAILED","detail":"ENOENT: no such file or directory, mkdir '/etc/secrets/cache'","code":"unknown"}`
+- 판정: 동일 증상 재현. 여전히 `/etc/secrets/cache` 경로 기반 런타임 캐시 처리 실패가 차단 요인.
 
 ## 5) 단계별 대응(계획 고정)
+
+### `2026-03-11 11:02:00+04:00` 로컬 패치 반영 직후 검증 상태
+- `verify-cutover.ps1` 실행 결과 (현재 코드 상태, 1차 재실행)
+  - `GET /api/ai/health` = 200 (PASS)
+  - `OPTIONS` 허용 origin = 204 (PASS)
+  - `OPTIONS` 금지 origin = 403 (PASS)
+  - `GET /api/ai/token` = 200 (PASS)
+  - `minted endpoint` = `https://iran-abu-ai-proxy.onrender.com/api/ai/chat` (PASS)
+  - `POST /api/ai/chat`(minted token) = **502** (FAIL)
+- 현재 502 원인은 아직도 `/etc/secrets/cache` 경로에서의 `mkdir` 에러로 추정.
+- 이 시점에 적용된 코드:
+  - `src/runtime-token.ts`에서 캐시 경로를 쓰기 가능성 기준으로 probe 후 선별
+  - `verify-cutover.ps1` 에러 본문 추출 경로 개선
+  - `setup-render-github-token.ps1` 신규 자동화 스크립트 추가
+- 판단: 로컬 코드만 바꾼 상태에서는 해결되지 않음. Render 재배포가 우선입니다.
 
 ### `token=403`
 - `AI_PROXY_ENABLED=1` 실제 반영 확인 → production redeploy → 재검증.
